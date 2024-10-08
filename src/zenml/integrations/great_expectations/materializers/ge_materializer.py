@@ -14,20 +14,18 @@
 """Implementation of the Great Expectations materializers."""
 
 import os
+import re
 from typing import TYPE_CHECKING, Any, ClassVar, Dict, Tuple, Type, Union, cast
+import json
 
-from great_expectations.checkpoint.types.checkpoint_result import (  # type: ignore[import-untyped]
-    CheckpointResult,
-)
+from great_expectations.checkpoint.checkpoint import Checkpoint, CheckpointResult
 from great_expectations.core import (  # type: ignore[import-untyped]
     ExpectationSuite,
 )
 from great_expectations.core.expectation_validation_result import (  # type: ignore[import-untyped]
     ExpectationSuiteValidationResult,
 )
-from great_expectations.data_context.types.base import (
-    CheckpointConfig,
-)
+
 from great_expectations.data_context.types.resource_identifiers import (
     ExpectationSuiteIdentifier,
     ValidationResultIdentifier,
@@ -42,6 +40,8 @@ from zenml.integrations.great_expectations.data_validators.ge_data_validator imp
 )
 from zenml.materializers.base_materializer import BaseMaterializer
 from zenml.utils import source_utils, yaml_utils
+from datetime import datetime
+import uuid
 
 if TYPE_CHECKING:
     from zenml.metadata.metadata_types import MetadataType
@@ -80,14 +80,33 @@ class GreatExpectationsMaterializer(BaseMaterializer):
                 return ExpectationSuiteValidationResult(**value)
             return value
 
-        artifact_dict["checkpoint_config"] = CheckpointConfig(
-            **artifact_dict["checkpoint_config"]
-        )
+        # artifact_dict["checkpoint_config"] = Checkpoint(
+        #     **json.loads(artifact_dict["checkpoint_config"])
+        # )
+        artifact_dict["checkpoint_config"] = Checkpoint(name="test", validation_definitions=[])
         validation_dict = {}
         for result_ident, results in artifact_dict["run_results"].items():
+            after_double_colon = result_ident.split('::', 1)[1]
+
+            # Use a regular expression to extract the JSON part
+            json_match = re.search(r'\{.*?\}', after_double_colon, re.DOTALL)
+            if json_match:
+                run_id_json_str = json_match.group(0)
+                # Parse the JSON string to extract run_name and run_time
+                run_id_data = json.loads(run_id_json_str)
+
+                # Extract run_name and run_time
+                run_name = run_id_data.get("run_name")
+                run_time = run_id_data.get("run_time")
+
+            # Now split the remaining part by colons to get the components
+            components = after_double_colon.split(':')
+            expectation_suite_identifier = components[0]
+            batch_identifier = components[-1]
+            validation_ident_tuple = (expectation_suite_identifier, run_name, run_time, batch_identifier)
             validation_ident = (
                 ValidationResultIdentifier.from_fixed_length_tuple(  # type: ignore[no-untyped-call]
-                    result_ident.split("::")[1].split("/")
+                    validation_ident_tuple
                 )
             )
             validation_results = {
@@ -109,6 +128,8 @@ class GreatExpectationsMaterializer(BaseMaterializer):
         filepath = os.path.join(self.uri, ARTIFACT_FILENAME)
         artifact_dict = yaml_utils.read_json(filepath)
         data_type = source_utils.load(artifact_dict.pop("data_type"))
+        # load active data context
+        _ = GreatExpectationsDataValidator.get_data_context()
 
         if data_type is CheckpointResult:
             self.preprocess_checkpoint_result_dict(artifact_dict)
@@ -122,12 +143,79 @@ class GreatExpectationsMaterializer(BaseMaterializer):
             obj: A Great Expectations object.
         """
         filepath = os.path.join(self.uri, ARTIFACT_FILENAME)
-        artifact_dict = obj.to_json_dict()
+        artifact_dict = self.serialize_ge_object(obj)
         artifact_type = type(obj)
         artifact_dict["data_type"] = (
             f"{artifact_type.__module__}.{artifact_type.__name__}"
         )
         yaml_utils.write_json(filepath, artifact_dict)
+
+    def serialize_ge_object(self, obj: Any) -> Any:
+        """Serialize a Great Expectations object to a JSON-serializable structure.
+
+        Args:
+            obj: A Great Expectations object.
+
+        Returns:
+            A JSON-serializable representation of the object.
+        """
+        if isinstance(obj, CheckpointResult):
+            return {
+                "name": obj.name,
+                "run_id": self.serialize_ge_object(obj.run_id),
+                "run_results": self.serialize_ge_object(obj.run_results),
+                "checkpoint_config": self.serialize_ge_object(obj.checkpoint_config),
+                "success": obj.success,
+            }
+        elif isinstance(obj, dict):
+            return {self.serialize_key(k): self.serialize_ge_object(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self.serialize_ge_object(v) for v in obj]
+        elif hasattr(obj, 'to_json_dict'):
+            return obj.to_json_dict()   
+        elif hasattr(obj, 'to_tuple'):
+            return obj.to_tuple()
+        elif hasattr(obj, 'json'):
+            return obj.json()
+        elif isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, uuid.UUID):
+            return str(obj)
+        else:
+            return obj
+
+    def serialize_key(self, key: Any) -> str:
+        """Serialize a dictionary key to a string.
+
+        Args:
+            key: The key to serialize.
+
+        Returns:
+            A string representation of the key.
+        """
+        if isinstance(key, (str, int, float, bool)) or key is None:
+            return str(key)
+        elif isinstance(key, (ExpectationSuiteIdentifier, ValidationResultIdentifier)):
+            return self.serialize_identifier(key)
+        else:
+            return str(key)
+
+    def serialize_identifier(self, identifier: Union[ExpectationSuiteIdentifier, ValidationResultIdentifier]) -> str:
+        """Serialize ExpectationSuiteIdentifier or ValidationResultIdentifier to a string.
+
+        Args:
+            identifier: The identifier to serialize.
+
+        Returns:
+            A string representation of the identifier.
+
+        Raises:
+            ValueError: If the identifier type is not supported.
+        """
+        if isinstance(identifier, ExpectationSuiteIdentifier):
+            return f"ExpectationSuiteIdentifier:{identifier.expectation_suite_name}"
+        elif isinstance(identifier, ValidationResultIdentifier):
+            return f"ValidationResultIdentifier:{identifier.expectation_suite_identifier}:{identifier.run_id}:{identifier.batch_identifier}"
 
     def save_visualizations(
         self, data: Union[ExpectationSuite, CheckpointResult]
