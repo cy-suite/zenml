@@ -8640,10 +8640,6 @@ class SqlZenStore(BaseZenStore):
                                 tzinfo=timezone.utc
                             )
                         )
-                    if run_update.end_time.tzinfo is None:
-                        run_update.end_time = run_update.end_time.replace(
-                            tzinfo=timezone.utc
-                        )
 
                     duration_time = (
                         run_update.end_time - pipeline_run.start_time
