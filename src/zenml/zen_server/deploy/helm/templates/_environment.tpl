@@ -140,8 +140,58 @@ Returns:
   A dictionary with the non-secret values configured for the ZenML server.
 */}}
 {{- define "zenml.serverConfigurationAttrs" -}}
+
+{{- if .ZenML.pro.enabled }}
+deployment_type: cloud
+pro_api_url: "{{ .ZenML.pro.apiURL }}"
+pro_dashboard_url: "{{ .ZenML.pro.dashboardURL }}"
+pro_oauth2_audience: "{{ .ZenML.pro.apiURL }}"
+pro_organization_id: "{{ .ZenML.pro.organizationID }}"
+pro_tenant_id: "{{ .ZenML.pro.tenantID }}"
+{{- if .ZenML.pro.tenantName }}
+pro_tenant_name: "{{ .ZenML.pro.tenantName }}"
+{{- end }}
+{{- if .ZenML.pro.organizationName }}
+pro_organization_name: "{{ .ZenML.pro.organizationName }}"
+{{- end }}
+{{- if .ZenML.pro.extraCorsOrigins }}
+cors_allow_origins: "{{ join "," .ZenML.pro.extraCorsOrigins }}"
+{{- end }}
+{{- if .ZenML.auth.jwtTokenExpireMinutes }}
+jwt_token_expire_minutes: {{ .ZenML.auth.jwtTokenExpireMinutes | quote }}
+{{- end }}
+
+{{- else }}
+
 auth_scheme: {{ .ZenML.authType | default .ZenML.auth.authType | quote }}
 deployment_type: {{ .ZenML.deploymentType | default "kubernetes" }}
+{{- if .ZenML.auth.corsAllowOrigins }}
+cors_allow_origins: {{ join "," .ZenML.auth.corsAllowOrigins | quote }}
+{{- end }}
+{{- if .ZenML.auth.externalLoginURL }}
+external_login_url: {{ .ZenML.auth.externalLoginURL | quote }}
+{{- end }}
+{{- if .ZenML.auth.externalUserInfoURL }}
+external_user_info_url: {{ .ZenML.auth.externalUserInfoURL | quote }}
+{{- end }}
+{{- if .ZenML.auth.externalServerID }}
+external_server_id: {{ .ZenML.auth.externalServerID | quote }}
+{{- end }}
+{{- if .ZenML.auth.jwtTokenExpireMinutes }}
+jwt_token_expire_minutes: {{ .ZenML.auth.jwtTokenExpireMinutes | quote }}
+{{- end }}
+{{- if .ZenML.auth.rbacImplementationSource }}
+rbac_implementation_source: {{ .ZenML.auth.rbacImplementationSource | quote }}
+{{- end }}
+{{- if .ZenML.auth.featureGateImplementationSource }}
+feature_gate_implementation_source: {{ .ZenML.auth.featureGateImplementationSource | quote }}
+{{- end }}
+{{- if .ZenML.dashboardURL }}
+dashboard_url: {{ .ZenML.dashboardURL | quote }}
+{{- end }}
+
+{{- end }}
+
 {{- if .ZenML.threadPoolSize }}
 thread_pool_size: {{ .ZenML.threadPoolSize | quote }}
 {{- end }}
@@ -157,17 +207,11 @@ jwt_token_audience: {{ .ZenML.auth.jwtTokenAudience | quote }}
 {{- if .ZenML.auth.jwtTokenLeewaySeconds }}
 jwt_token_leeway_seconds: {{ .ZenML.auth.jwtTokenLeewaySeconds | quote }}
 {{- end }}
-{{- if .ZenML.auth.jwtTokenExpireMinutes }}
-jwt_token_expire_minutes: {{ .ZenML.auth.jwtTokenExpireMinutes | quote }}
-{{- end }}
 {{- if .ZenML.auth.authCookieName }}
 auth_cookie_name: {{ .ZenML.auth.authCookieName | quote }}
 {{- end }}
 {{- if .ZenML.auth.authCookieDomain }}
 auth_cookie_domain: {{ .ZenML.auth.authCookieDomain | quote }}
-{{- end }}
-{{- if .ZenML.auth.corsAllowOrigins }}
-cors_allow_origins: {{ join "," .ZenML.auth.corsAllowOrigins | quote }}
 {{- end }}
 {{- if .ZenML.auth.maxFailedDeviceAuthAttempts }}
 max_failed_device_auth_attempts: {{ .ZenML.auth.maxFailedDeviceAuthAttempts | quote }}
@@ -184,32 +228,41 @@ device_expiration_minutes: {{ .ZenML.auth.deviceExpirationMinutes | quote }}
 {{- if .ZenML.auth.trustedDeviceExpirationMinutes }}
 trusted_device_expiration_minutes: {{ .ZenML.auth.trustedDeviceExpirationMinutes | quote }}
 {{- end }}
-{{- if .ZenML.auth.externalLoginURL }}
-external_login_url: {{ .ZenML.auth.externalLoginURL | quote }}
-{{- end }}
-{{- if .ZenML.auth.externalUserInfoURL }}
-external_user_info_url: {{ .ZenML.auth.externalUserInfoURL | quote }}
-{{- end }}
-{{- if .ZenML.auth.externalCookieName }}
-external_cookie_name: {{ .ZenML.auth.externalCookieName | quote }}
-{{- end }}
-{{- if .ZenML.auth.externalServerID }}
-external_server_id: {{ .ZenML.auth.externalServerID | quote }}
-{{- end }}
 {{- if .ZenML.rootUrlPath }}
 root_url_path: {{ .ZenML.rootUrlPath | quote }}
 {{- end }}
 {{- if .ZenML.serverURL }}
 server_url: {{ .ZenML.serverURL | quote }}
 {{- end }}
-{{- if .ZenML.dashboardURL }}
-dashboard_url: {{ .ZenML.dashboardURL | quote }}
-{{- end }}
-{{- if .ZenML.auth.rbacImplementationSource }}
-rbac_implementation_source: {{ .ZenML.auth.rbacImplementationSource | quote }}
-{{- end }}
 {{- range $key, $value := .ZenML.secure_headers }}
 secure_headers_{{ $key }}: {{ $value | quote }}
+{{- end }}
+{{- end }}
+
+
+{{/*
+ZenML server configuration options (secret values).
+
+This template constructs a dictionary that is similar to the python values that
+can be configured in the zenml.config.server_config.ServerConfiguration
+class. Only secret values are included in this dictionary.
+
+The dictionary is then converted into deployment environment variables by other
+templates and inserted where it is needed.
+
+The input is taken from a .ZenML dict that is passed to the template and
+contains the values configured in the values.yaml file for the ZenML server.
+
+Args:
+  .ZenML: A dictionary with the ZenML configuration values configured for the
+  ZenML server.
+Returns:
+  A dictionary with the secret values configured for the ZenML server.
+*/}}
+{{- define "zenml.serverSecretConfigurationAttrs" -}}
+
+{{- if .ZenML.pro.enabled }}
+pro_oauth2_client_secret: {{ .ZenML.pro.enrollmentKey | quote }}
 {{- end }}
 {{- end }}
 
@@ -230,6 +283,27 @@ Returns:
 {{- define "zenml.serverEnvVariables" -}}
 {{ $zenml := dict "ZenML" .Values.zenml }}
 {{- range $k, $v := include "zenml.serverConfigurationAttrs" $zenml | fromYaml }}
+ZENML_SERVER_{{ $k | upper }}: {{ $v | quote }}
+{{- end }}
+{{- end }}
+
+
+{{/*
+Server configuration environment variables (secret values).
+
+Passes the .Values.zenml dict as input to the `zenml.serverSecretConfigurationAttrs`
+template and converts the output into a dictionary of environment variables that
+need to be configured for the server.
+
+Args:
+  .Values: The values.yaml file for the ZenML deployment.
+Returns:
+  A dictionary with the secret environment variables that are configured for
+  the server (i.e. keys starting with `ZENML_SERVER_`).
+*/}}
+{{- define "zenml.serverSecretEnvVariables" -}}
+{{ $zenml := dict "ZenML" .Values.zenml }}
+{{- range $k, $v := include "zenml.serverSecretConfigurationAttrs" $zenml | fromYaml }}
 ZENML_SERVER_{{ $k | upper }}: {{ $v | quote }}
 {{- end }}
 {{- end }}
